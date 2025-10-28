@@ -17,6 +17,11 @@ const userSchema = new mongoose.Schema(
       trim: true,
       minlength: 2
     },
+    sex: {
+      type: String,
+      enum: ["male", "female"], // 🎯 여기서 제한
+      required: true
+    },
     email: {
       type: String,
       required: true,
@@ -49,7 +54,8 @@ const userSchema = new mongoose.Schema(
     profileImage: {
       type: String,
       default: ""
-    }
+    },
+    refreshToken: { type: String, select: false }
   },
   {
     timestamps: true,
@@ -63,20 +69,60 @@ const userSchema = new mongoose.Schema(
   }
 );
 
+// 1) 유저 저장 전 비밀번호 해싱
 userSchema.pre("save", async function (next) {
-  if (this.isModified("password")) {
-    this.password = await bcrypt.hash(this.password, 10);
-  }
+  if (!this.isModified("password")) return next(); // 비밀번호가 수정되지 않았다면 다음으로 넘어감 ,  이중 암호화 방지
+
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
+  console.log("유저 저장전에 작동되는지 확인하는 콘솔");
   next();
+
+  // 여기서 this는 위의 user 인스턴스를 가리킴
+  // this.password  // → user.password
+  // this.email     // → user.email
+  // this.sex       // → user.sex
 });
 
+// userSchema.pre('findOneAndUpdate', async function (next) {
+//   const update = this.getUpdate();
+
+//   if (update.password) {
+//     update.password = await bcrypt.hash(update.password, 10);
+//     this.setUpdate(update);
+//   }
+
+//   next();
+// });
+
+// 2) 비밀번호 비교 (문서 메서드)
 userSchema.methods.comparePassword = async function (plain) {
   return bcrypt.compare(plain, this.password);
 };
 
+// 3) 액세스 토큰 발급 (문서 메서드)
 userSchema.methods.generateAuthToken = function () {
   return jwt.sign({ id: this._id }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 };
+
+// 4) 리프레시 토큰 발급 (문서 메서드)
+//   - 보안상 httpOnly 쿠키로 내려주고, 서버에는 해시로 저장하거나 Redis에 저장 추천
+// userSchema.methods.generateRefreshToken = function () {
+//   const payload = { sub: this._id.toString(), type: "refresh" };
+//   const token = jwt.sign(payload, process.env.JWT_REFRESH_SECRET, {
+//     expiresIn: "7d"
+//   });
+//   return token;
+// };
+
+// 5) (선택) 리프레시 토큰 저장 헬퍼
+// userSchema.methods.rotateRefreshToken = async function () {
+//   const token = this.generateRefreshToken();
+//   // DB에 평문 저장 대신 해시 저장을 권장 (여기선 간단히 평문 예시)
+//   this.refreshToken = token;
+//   await this.save();
+//   return token;
+// };
 
 const UserModel = mongoose.model("User", userSchema);
 
